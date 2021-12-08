@@ -1,1 +1,1 @@
-# distributed-log
+# Distributed Log service using Go
