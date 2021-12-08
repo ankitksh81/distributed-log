@@ -1,8 +1,8 @@
-syntax = "proto3"
+syntax = "proto3";
 
 package log.v1;
 
-option go_package = "github.com/ankitksh81/api/log_v1"
+option go_package = "github.com/ankitksh81/api/log_v1";
 
 message Record {
     bytes value = 1;
