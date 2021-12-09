@@ -1,0 +1,36 @@
+name: Go
+
+on:
+  push:
+    branches: ["*"]
+    tags: ["v*"]
+  pull_request:
+    branches: ["*"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go: ["1.15.x", "1.16.x", "1.17.x"]
+        include:
+          - go: 1.17.x
+            latest: true
+
+    steps:
+      - name: Setup Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: ${{ matrix.go }}
+
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Download Dependencies
+        run: go mod download
+
+      - name: Build
+        run: go build -v ./...
+
+      - name: Test
+        run: go test -v ./...
