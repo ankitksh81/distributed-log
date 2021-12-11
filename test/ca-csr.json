@@ -1,0 +1,16 @@
+{
+  "CN": "My Certificate",
+  "key": {
+    "algo": "rsa",
+    "size": 2048
+  },
+  "names": [
+    {
+      "C": "IN",
+      "L": "BLR",
+      "ST": "Karnataka",
+      "O": "Distributed-Log",
+      "OU": "Developer"
+    }
+  ]
+}
