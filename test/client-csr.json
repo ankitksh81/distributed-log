@@ -1,6 +1,6 @@
 {
-  "CN": "127.0.0.1",
-  "hosts": ["localhost", "127.0.0.1"],
+  "CN": "client",
+  "hosts": [""],
   "key": {
     "algo": "rsa",
     "size": 2048
@@ -10,7 +10,7 @@
       "C": "CA",
       "L": "ON",
       "ST": "Toronto",
-      "O": "My Awesome Company",
+      "O": "My Company",
       "OU": "Distributed Services"
     }
   ]
