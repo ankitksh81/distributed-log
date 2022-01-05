@@ -19,6 +19,10 @@ gencert:
 
 	@echo "Certificate generated"
 
+copy:
+	cp test/model.conf $(CONFIG_PATH)/model.conf
+	cp test/policy.csv $(CONFIG_PATH)/policy.csv
+
 test:
 	go test -race ./...
 
