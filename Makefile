@@ -1,7 +1,7 @@
 # START: begin
 CONFIG_PATH=${HOME}/.proglog/
 
-all: init gencert
+all: init gencert copy
 
 init:
 	@echo "Creating directory..."
