@@ -27,7 +27,12 @@ jobs:
         uses: actions/checkout@v2
 
       - name: Download Dependencies
-        run: go mod download
+        run: |
+          echo "Installing dependencies from mod file"
+          go mod download
+          go get github.com/cloudflare/cfssl/cmd/cfssl@v1.4.1
+          go get github.com/cloudflare/cfssl/cmd/cfssljson@v1.4.1
+          echo "Done installing dependencies"
 
       - name: Build
         run: go build -v ./...
