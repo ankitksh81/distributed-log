@@ -28,34 +28,42 @@ type Authorizer interface {
 	Authorize(sub, obj, action string) error
 }
 
-var _ api.LogServer = (*grpcServer)(nil)
+type grpcServer struct {
+	// api.UnimplementedLogServer
+	*Config
+}
+
+// var _ api.LogServer = (*grpcServer)(nil)
 
 // NewGRPCServer() provides a way to instantiate the service
-func NewGRPCServer(config *Config, opts ...grpc.ServerOption) (*grpc.Server, error) {
+func NewGRPCServer(config *Config, opts ...grpc.ServerOption) (
+	*grpc.Server,
+	error,
+) {
+	// END: newgrpcserver_before_auth
 	opts = append(opts, grpc.StreamInterceptor(
 		grpc_middleware.ChainStreamServer(
 			grpc_auth.StreamServerInterceptor(authenticate),
 		)), grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 		grpc_auth.UnaryServerInterceptor(authenticate),
 	)))
-
-	gsrv := grpc.NewServer()
+	// START: newgrpcserver_before_auth
+	gsrv := grpc.NewServer(opts...)
 	srv, err := newgrpcServer(config)
 	if err != nil {
 		return nil, err
 	}
-
-	api.RegisterLogServer(gsrv, srv)
+	api.RegisterLogService(gsrv, &api.LogService{
+		Produce:       srv.Produce,
+		Consume:       srv.Consume,
+		ConsumeStream: srv.ConsumeStream,
+		ProduceStream: srv.ProduceStream,
+	})
 	return gsrv, nil
 }
 
-type grpcServer struct {
-	api.UnimplementedLogServer
-	*Config
-}
-
-func newgrpcServer(config *Config) (srv *grpcServer, err error) {
-	srv = &grpcServer{
+func newgrpcServer(config *Config) (*grpcServer, error) {
+	srv := &grpcServer{
 		Config: config,
 	}
 	return srv, nil
@@ -95,15 +103,12 @@ func (s *grpcServer) Consume(ctx context.Context, req *api.ConsumeRequest) (
 	return &api.ConsumeResponse{Record: record}, nil
 }
 
-func (s *grpcServer) ProduceStream(
-	stream api.Log_ProduceStreamServer,
-) error {
+func (s *grpcServer) ProduceStream(stream api.Log_ProduceStreamServer) error {
 	for {
 		req, err := stream.Recv()
 		if err != nil {
 			return err
 		}
-
 		res, err := s.Produce(stream.Context(), req)
 		if err != nil {
 			return err
@@ -150,6 +155,13 @@ func authenticate(ctx context.Context) (context.Context, error) {
 		return ctx, status.New(
 			codes.Unknown,
 			"couldn't find peer info",
+		).Err()
+	}
+
+	if peer.AuthInfo == nil {
+		return ctx, status.New(
+			codes.Unauthenticated,
+			"no transport security being used",
 		).Err()
 	}
 

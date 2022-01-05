@@ -4,6 +4,7 @@ import (
 	"context"
 	"io/ioutil"
 	"net"
+	"os"
 	"testing"
 
 	api "github.com/ankitksh81/distributed-log/api/v1"
@@ -48,9 +49,11 @@ func setupTest(t *testing.T, fn func(*Config)) (
 	teardown func(),
 ) {
 	t.Helper()
+
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 
+	// START: multi_client
 	newClient := func(crtPath, keyPath string) (
 		*grpc.ClientConn,
 		api.LogClient,
@@ -80,42 +83,28 @@ func setupTest(t *testing.T, fn func(*Config)) (
 	var nobodyConn *grpc.ClientConn
 	nobodyConn, nobodyClient, _ = newClient(
 		config.NobodyClientCertFile,
-		config.NobodyClientkeyFile,
+		config.NobodyClientKeyFile,
 	)
-
-	// clientTLSConfig, err := config.SetupTLSConfig(config.TLSConfig{
-	// 	CertFile: config.ClientCertFile,
-	// 	KeyFile:  config.ClientKeyFile,
-	// 	CAFile:   config.CAFile,
-	// })
-	// require.NoError(t, err)
-
-	// clientCreds := credentials.NewTLS(clientTLSConfig)
-	// cc, err := grpc.Dial(
-	// 	l.Addr().String(),
-	// 	grpc.WithTransportCredentials(clientCreds),
-	// )
-	// require.NoError(t, err)
-
-	// client = api.NewLogClient(cc)
+	// END: multi_client
 
 	serverTLSConfig, err := config.SetupTLSConfig(config.TLSConfig{
-		CertFile:   config.ServerCertFile,
-		KeyFile:    config.ServerKeyFile,
-		CAFile:     config.CAFile,
-		ServerAddr: l.Addr().String(),
-		Server:     true,
+		CertFile: config.ServerCertFile,
+		KeyFile:  config.ServerKeyFile,
+		CAFile:   config.CAFile,
+		Server:   true,
 	})
 	require.NoError(t, err)
 	serverCreds := credentials.NewTLS(serverTLSConfig)
 
 	dir, err := ioutil.TempDir("", "server-test")
 	require.NoError(t, err)
+	defer os.RemoveAll(dir)
 
 	clog, err := log.NewLog(dir, log.Config{})
 	require.NoError(t, err)
 
-	authorizer := auth.New(config.ACLModeFile, config.ACLPolicyFile)
+	authorizer := auth.New(config.ACLModelFile, config.ACLPolicyFile)
+
 	cfg = &Config{
 		CommitLog:  clog,
 		Authorizer: authorizer,
@@ -123,6 +112,7 @@ func setupTest(t *testing.T, fn func(*Config)) (
 	if fn != nil {
 		fn(cfg)
 	}
+
 	server, err := NewGRPCServer(cfg, grpc.Creds(serverCreds))
 	require.NoError(t, err)
 
@@ -130,12 +120,14 @@ func setupTest(t *testing.T, fn func(*Config)) (
 		server.Serve(l)
 	}()
 
+	// START: teardown
 	return rootClient, nobodyClient, cfg, func() {
 		server.Stop()
 		rootConn.Close()
 		nobodyConn.Close()
 		l.Close()
 	}
+	// END: teardown
 }
 
 // testProduceConsume() tests that producing and consuming works by using our
@@ -166,7 +158,9 @@ func testProduceConsume(t *testing.T, client, _ api.LogClient, config *Config) {
 // testConsumePastBoundary() tests that our server responds with an
 // api.ErrOffsetOutOfRange() error when a client tries to consume
 // beyond the log's boundaries
-func testConsumePastBoundary(t *testing.T, client, _ api.LogClient,
+func testConsumePastBoundary(
+	t *testing.T,
+	client, _ api.LogClient,
 	config *Config,
 ) {
 	ctx := context.Background()
@@ -183,7 +177,6 @@ func testConsumePastBoundary(t *testing.T, client, _ api.LogClient,
 	if consume != nil {
 		t.Fatal("consume not nil")
 	}
-
 	got := grpc.Code(err)
 	want := grpc.Code(api.ErrOffsetOutOfRange{}.GRPCStatus().Err())
 	if got != want {
@@ -194,7 +187,9 @@ func testConsumePastBoundary(t *testing.T, client, _ api.LogClient,
 // testProduceConsumeStream() is the streaming counterpart to
 // testProduceConsume(), testing that we can produce and consume
 // through streams.
-func testProduceConsumeStream(t *testing.T, client, _ api.LogClient,
+func testProduceConsumeStream(
+	t *testing.T,
+	client, _ api.LogClient,
 	config *Config,
 ) {
 	ctx := context.Background()
@@ -206,6 +201,7 @@ func testProduceConsumeStream(t *testing.T, client, _ api.LogClient,
 		Value:  []byte("second message"),
 		Offset: 1,
 	}}
+
 	{
 		stream, err := client.ProduceStream(ctx)
 		require.NoError(t, err)
@@ -226,6 +222,7 @@ func testProduceConsumeStream(t *testing.T, client, _ api.LogClient,
 			}
 		}
 	}
+
 	{
 		stream, err := client.ConsumeStream(
 			ctx,
@@ -257,7 +254,6 @@ func testUnauthorized(
 			},
 		},
 	)
-
 	if produce != nil {
 		t.Fatalf("produce response should be nil")
 	}
@@ -268,7 +264,6 @@ func testUnauthorized(
 	consume, err := client.Consume(ctx, &api.ConsumeRequest{
 		Offset: 0,
 	})
-
 	if consume != nil {
 		t.Fatalf("consume response should be nil")
 	}
