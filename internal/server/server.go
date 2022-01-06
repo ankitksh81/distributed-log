@@ -25,8 +25,9 @@ import (
 )
 
 type Config struct {
-	CommitLog  CommitLog
-	Authorizer Authorizer
+	CommitLog   CommitLog
+	Authorizer  Authorizer
+	GetServerer GetServerer
 }
 
 const (
@@ -190,6 +191,21 @@ func (s *grpcServer) ConsumeStream(
 			req.Offset++
 		}
 	}
+}
+
+// GetServers enable us to inject different structs that can get servers.
+func (s *grpcServer) GetServers(ctx context.Context,
+	req *api.GetServersRequest,
+) (*api.GetServersResponse, error) {
+	servers, err := s.GetServerer.GetServers()
+	if err != nil {
+		return nil, err
+	}
+	return &api.GetServersResponse{Servers: servers}, nil
+}
+
+type GetServerer interface {
+	GetServers() ([]*api.Server, error)
 }
 
 type CommitLog interface {
