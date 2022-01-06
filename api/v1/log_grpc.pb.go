@@ -21,6 +21,7 @@ type LogClient interface {
 	Consume(ctx context.Context, in *ConsumeRequest, opts ...grpc.CallOption) (*ConsumeResponse, error)
 	ConsumeStream(ctx context.Context, in *ConsumeRequest, opts ...grpc.CallOption) (Log_ConsumeStreamClient, error)
 	ProduceStream(ctx context.Context, opts ...grpc.CallOption) (Log_ProduceStreamClient, error)
+	GetServers(ctx context.Context, in *GetServersRequest, opts ...grpc.CallOption) (*GetServersResponse, error)
 }
 
 type logClient struct {
@@ -131,6 +132,19 @@ func (x *logProduceStreamClient) Recv() (*ProduceResponse, error) {
 	return m, nil
 }
 
+var logGetServersStreamDesc = &grpc.StreamDesc{
+	StreamName: "GetServers",
+}
+
+func (c *logClient) GetServers(ctx context.Context, in *GetServersRequest, opts ...grpc.CallOption) (*GetServersResponse, error) {
+	out := new(GetServersResponse)
+	err := c.cc.Invoke(ctx, "/log.v1.Log/GetServers", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // LogService is the service API for Log service.
 // Fields should be assigned to their respective handler implementations only before
 // RegisterLogService is called.  Any unassigned fields will result in the
@@ -140,6 +154,7 @@ type LogService struct {
 	Consume       func(context.Context, *ConsumeRequest) (*ConsumeResponse, error)
 	ConsumeStream func(*ConsumeRequest, Log_ConsumeStreamServer) error
 	ProduceStream func(Log_ProduceStreamServer) error
+	GetServers    func(context.Context, *GetServersRequest) (*GetServersResponse, error)
 }
 
 func (s *LogService) produce(_ interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -185,6 +200,23 @@ func (s *LogService) consumeStream(_ interface{}, stream grpc.ServerStream) erro
 }
 func (s *LogService) produceStream(_ interface{}, stream grpc.ServerStream) error {
 	return s.ProduceStream(&logProduceStreamServer{stream})
+}
+func (s *LogService) getServers(_ interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetServersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return s.GetServers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     s,
+		FullMethod: "/log.v1.Log/GetServers",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return s.GetServers(ctx, req.(*GetServersRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 type Log_ConsumeStreamServer interface {
@@ -245,6 +277,11 @@ func RegisterLogService(s grpc.ServiceRegistrar, srv *LogService) {
 			return status.Errorf(codes.Unimplemented, "method ProduceStream not implemented")
 		}
 	}
+	if srvCopy.GetServers == nil {
+		srvCopy.GetServers = func(context.Context, *GetServersRequest) (*GetServersResponse, error) {
+			return nil, status.Errorf(codes.Unimplemented, "method GetServers not implemented")
+		}
+	}
 	sd := grpc.ServiceDesc{
 		ServiceName: "log.v1.Log",
 		Methods: []grpc.MethodDesc{
@@ -255,6 +292,10 @@ func RegisterLogService(s grpc.ServiceRegistrar, srv *LogService) {
 			{
 				MethodName: "Consume",
 				Handler:    srvCopy.consume,
+			},
+			{
+				MethodName: "GetServers",
+				Handler:    srvCopy.getServers,
 			},
 		},
 		Streams: []grpc.StreamDesc{
