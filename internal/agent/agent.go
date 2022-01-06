@@ -4,27 +4,32 @@
 package agent
 
 import (
+	"bytes"
 	"crypto/tls"
 	"fmt"
+	"io"
 	"net"
 	"sync"
+	"time"
 
-	api "github.com/ankitksh81/distributed-log/api/v1"
 	"github.com/ankitksh81/distributed-log/internal/auth"
 	"github.com/ankitksh81/distributed-log/internal/discovery"
 	"github.com/ankitksh81/distributed-log/internal/log"
 	"github.com/ankitksh81/distributed-log/internal/server"
+	"github.com/hashicorp/raft"
+	"github.com/soheilhy/cmux"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
 
 type Agent struct {
-	Config
-	log        *log.Log
+	Config Config
+
+	mux        cmux.CMux
+	log        *log.DistributedLog
 	server     *grpc.Server
 	membership *discovery.Membership
-	replicator *log.Replicator
 
 	shutdown     bool
 	shutdowns    chan struct{}
@@ -38,6 +43,7 @@ type Config struct {
 	DataDir        string
 	BindAddr       string
 	RPCPort        int
+	Bootstrap      bool
 	NodeName       string
 	StartJoinAddrs []string
 	ACLModelFile   string
@@ -61,6 +67,7 @@ func New(config Config) (*Agent, error) {
 	}
 	setup := []func() error{
 		a.setupLogger,
+		a.setupMux,
 		a.setupLog,
 		a.setupServer,
 		a.setupMembership,
@@ -70,7 +77,26 @@ func New(config Config) (*Agent, error) {
 			return nil, err
 		}
 	}
+
+	go a.serve()
 	return a, nil
+}
+
+// setupMux creates a listener on our RPC address that'll accept both
+// Raft and gRPC connections and then creates the mux with the listener.
+// The mux will accept connections on that listener and match connections
+// based on your configured rules.
+func (a *Agent) setupMux() error {
+	rpcAddr := fmt.Sprintf(
+		":%d",
+		a.Config.RPCPort,
+	)
+	ln, err := net.Listen("tcp", rpcAddr)
+	if err != nil {
+		return err
+	}
+	a.mux = cmux.New(ln)
+	return nil
 }
 
 func (a *Agent) setupLogger() error {
@@ -83,11 +109,34 @@ func (a *Agent) setupLogger() error {
 }
 
 func (a *Agent) setupLog() error {
-	var err error
-	a.log, err = log.NewLog(
-		a.Config.DataDir,
-		log.Config{},
+	raftLn := a.mux.Match(func(reader io.Reader) bool {
+		b := make([]byte, 1)
+		if _, err := reader.Read(b); err != nil {
+			return false
+		}
+		return bytes.Compare(b, []byte{byte(log.RaftRPC)}) == 0
+	})
+
+	logConfig := log.Config{}
+	logConfig.Raft.StreamLayer = log.NewStreamLayer(
+		raftLn,
+		a.Config.ServerTLSConfig,
+		a.Config.PeerTLSConfig,
 	)
+	logConfig.Raft.LocalID = raft.ServerID(a.Config.NodeName)
+	logConfig.Raft.Bootstrap = a.Config.Bootstrap
+
+	var err error
+	a.log, err = log.NewDistributedLog(
+		a.Config.DataDir,
+		logConfig,
+	)
+	if err != nil {
+		return err
+	}
+	if a.Config.Bootstrap {
+		err = a.log.WaitForLeader(3 * time.Second)
+	}
 	return err
 }
 
@@ -113,18 +162,9 @@ func (a *Agent) setupServer() error {
 		return err
 	}
 
-	rpcAddr, err := a.RPCAddr()
-	if err != nil {
-		return nil
-	}
-
-	ln, err := net.Listen("tcp", rpcAddr)
-	if err != nil {
-		return err
-	}
-
+	grpcLn := a.mux.Match(cmux.Any())
 	go func() {
-		if err := a.server.Serve(ln); err != nil {
+		if err := a.server.Serve(grpcLn); err != nil {
 			_ = a.Shutdown()
 		}
 	}()
@@ -141,26 +181,7 @@ func (a *Agent) setupMembership() error {
 		return err
 	}
 
-	var opts []grpc.DialOption
-	if a.Config.PeerTLSConfig != nil {
-		opts = append(opts, grpc.WithTransportCredentials(
-			credentials.NewTLS(a.Config.PeerTLSConfig),
-		),
-		)
-	}
-
-	conn, err := grpc.Dial(rpcAddr, opts...)
-	if err != nil {
-		return err
-	}
-
-	client := api.NewLogClient(conn)
-	a.replicator = &log.Replicator{
-		DialOptions: opts,
-		LocalServer: client,
-	}
-
-	a.membership, err = discovery.New(a.replicator, discovery.Config{
+	a.membership, err = discovery.New(a.log, discovery.Config{
 		NodeName: a.Config.NodeName,
 		BindAddr: a.Config.BindAddr,
 		Tags: map[string]string{
@@ -172,7 +193,7 @@ func (a *Agent) setupMembership() error {
 }
 
 // Shutdown() ensures that the agent will shut down once
-// even if people call Shutdown() multiple times.
+// even if people call Shutdown multiple times.
 func (a *Agent) Shutdown() error {
 	a.shutdownLock.Lock()
 	defer a.shutdownLock.Unlock()
@@ -185,7 +206,6 @@ func (a *Agent) Shutdown() error {
 
 	shutdown := []func() error{
 		a.membership.Leave,
-		a.replicator.Close,
 		func() error {
 			a.server.GracefulStop()
 			return nil
@@ -196,6 +216,14 @@ func (a *Agent) Shutdown() error {
 		if err := fn(); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func (a *Agent) serve() error {
+	if err := a.mux.Serve(); err != nil {
+		_ = a.Shutdown()
+		return err
 	}
 	return nil
 }

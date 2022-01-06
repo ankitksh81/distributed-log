@@ -115,7 +115,7 @@ func (l *DistributedLog) setupRaft(dataDir string) error {
 	}
 
 	if l.config.Raft.CommitTimeout != 0 {
-		config.CommitTimeout = l.config.Raft.LeaderLeaseTimeout
+		config.CommitTimeout = l.config.Raft.CommitTimeout
 	}
 
 	l.raft, err = raft.NewRaft(
