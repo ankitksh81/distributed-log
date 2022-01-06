@@ -31,8 +31,6 @@ jobs:
           go mod download
           go get github.com/cloudflare/cfssl/cmd/cfssl@v1.4.1
           go get github.com/cloudflare/cfssl/cmd/cfssljson@v1.4.1
-          go get github.com/hashicorp/raft
-          go mod edit -replace github.com/hashicorp/raft-boltdb=github.com/travisjeffery/raft-boltdb@v1.0.0
 
       - name: Build
         run: go build -v ./...
