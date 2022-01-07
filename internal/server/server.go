@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"strings"
 
 	api "github.com/ankitksh81/distributed-log/api/v1"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
@@ -36,16 +35,13 @@ const (
 	consumeAction  = "consume"
 )
 
-type Authorizer interface {
-	Authorize(sub, obj, action string) error
-}
-
 type grpcServer struct {
-	// api.UnimplementedLogServer
 	*Config
 }
 
-// var _ api.LogServer = (*grpcServer)(nil)
+type Authorizer interface {
+	Authorize(sub, obj, action string) error
+}
 
 // NewGRPCServer() provides a way to instantiate the service
 func NewGRPCServer(config *Config, grpcOpts ...grpc.ServerOption) (
@@ -70,30 +66,21 @@ func NewGRPCServer(config *Config, grpcOpts ...grpc.ServerOption) (
 		return nil, err
 	}
 
-	halfSampler := trace.ProbabilitySampler(0.5)
-	trace.ApplyConfig(trace.Config{
-		DefaultSampler: func(sp trace.SamplingParameters) trace.SamplingDecision {
-			if strings.Contains(sp.Name, "produce") {
-				return trace.SamplingDecision{Sample: true}
-			}
-			return halfSampler(sp)
-		},
-	})
-
 	// By adding grpc_ctxtags and grpc_zap, we configure gRPC to apply
 	// Zap interceptors that log the gRPC calls and attach OpenCensus as
 	// the server's stat handler so that OpenCensus can record stats on
 	// the server's request handling.
-	grpcOpts = append(grpcOpts, grpc.StreamInterceptor(
-		grpc_middleware.ChainStreamServer(
-			grpc_ctxtags.StreamServerInterceptor(),
-			grpc_zap.StreamServerInterceptor(logger, zapOpts...),
-			grpc_auth.StreamServerInterceptor(authenticate),
-		)), grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
-		grpc_ctxtags.UnaryServerInterceptor(),
-		grpc_zap.UnaryServerInterceptor(logger, zapOpts...),
-		grpc_auth.UnaryServerInterceptor(authenticate),
-	)),
+	grpcOpts = append(grpcOpts,
+		grpc.StreamInterceptor(
+			grpc_middleware.ChainStreamServer(
+				grpc_ctxtags.StreamServerInterceptor(),
+				grpc_zap.StreamServerInterceptor(logger, zapOpts...),
+				grpc_auth.StreamServerInterceptor(authenticate),
+			)), grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
+			grpc_ctxtags.UnaryServerInterceptor(),
+			grpc_zap.UnaryServerInterceptor(logger, zapOpts...),
+			grpc_auth.UnaryServerInterceptor(authenticate),
+		)),
 		grpc.StatsHandler(&ocgrpc.ServerHandler{}),
 	)
 
@@ -107,6 +94,7 @@ func NewGRPCServer(config *Config, grpcOpts ...grpc.ServerOption) (
 		Consume:       srv.Consume,
 		ConsumeStream: srv.ConsumeStream,
 		ProduceStream: srv.ProduceStream,
+		GetServers:    srv.GetServers,
 	})
 	return gsrv, nil
 }
@@ -194,8 +182,8 @@ func (s *grpcServer) ConsumeStream(
 }
 
 // GetServers enable us to inject different structs that can get servers.
-func (s *grpcServer) GetServers(ctx context.Context,
-	req *api.GetServersRequest,
+func (s *grpcServer) GetServers(
+	ctx context.Context, req *api.GetServersRequest,
 ) (*api.GetServersResponse, error) {
 	servers, err := s.GetServerer.GetServers()
 	if err != nil {
