@@ -18,7 +18,6 @@ import (
 	"github.com/ankitksh81/distributed-log/internal/server"
 	"github.com/hashicorp/raft"
 	"github.com/soheilhy/cmux"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
@@ -50,7 +49,7 @@ type Config struct {
 	ACLPolicyFile  string
 }
 
-func (c *Config) RPCAddr() (string, error) {
+func (c Config) RPCAddr() (string, error) {
 	host, _, err := net.SplitHostPort(c.BindAddr)
 	if err != nil {
 		return "", err
@@ -66,12 +65,12 @@ func New(config Config) (*Agent, error) {
 		shutdowns: make(chan struct{}),
 	}
 	setup := []func() error{
-		a.setupLogger,
 		a.setupMux,
 		a.setupLog,
 		a.setupServer,
 		a.setupMembership,
 	}
+
 	for _, fn := range setup {
 		if err := fn(); err != nil {
 			return nil, err
@@ -99,14 +98,14 @@ func (a *Agent) setupMux() error {
 	return nil
 }
 
-func (a *Agent) setupLogger() error {
-	logger, err := zap.NewDevelopment()
-	if err != nil {
-		return err
-	}
-	zap.ReplaceGlobals(logger)
-	return nil
-}
+// func (a *Agent) setupLogger() error {
+// 	logger, err := zap.NewDevelopment()
+// 	if err != nil {
+// 		return err
+// 	}
+// 	zap.ReplaceGlobals(logger)
+// 	return nil
+// }
 
 func (a *Agent) setupLog() error {
 	raftLn := a.mux.Match(func(reader io.Reader) bool {
@@ -135,9 +134,9 @@ func (a *Agent) setupLog() error {
 		return err
 	}
 	if a.Config.Bootstrap {
-		err = a.log.WaitForLeader(3 * time.Second)
+		return a.log.WaitForLeader(3 * time.Second)
 	}
-	return err
+	return nil
 }
 
 func (a *Agent) setupServer() error {
